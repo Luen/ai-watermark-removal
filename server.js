@@ -463,7 +463,7 @@ app.get('/api', (c) =>
 )
 
 // API endpoint for watermark detection
-app.post('/detect-watermark', async (c) => {
+app.post('/api/detect-watermark', async (c) => {
     try {
         const data = await c.req.formData()
         const image = data.get('image')
@@ -518,7 +518,7 @@ app.post('/detect-watermark', async (c) => {
 })
 
 // API endpoint for watermark removal
-app.post('/remove-watermark', async (c) => {
+app.post('/api/remove-watermark', async (c) => {
     try {
         const data = await c.req.formData()
         const image = data.get('image')
@@ -732,7 +732,7 @@ app.get('/health', (c) => c.json({ status: 'ok' }))
 
 // Start the server
 const port = process.env.PORT || 3000
-log(`Server is running on port ${port}`)
+log(`Server is running on http://localhost:${port}`)
 
 serve({
     fetch: app.fetch,
