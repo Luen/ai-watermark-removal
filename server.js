@@ -8,6 +8,13 @@ import { cors } from 'hono/cors'
 import { serveStatic } from '@hono/node-server/serve-static'
 import sharp from 'sharp'
 
+// TODO:
+// - Add api keys, dashboards, and stripe for payments
+// - Add rate limiting
+// - Add remove watermark by urling a url
+// - Add image editing endpoint
+// - Add watermarking endpoint
+
 // Load environment variables first
 dotenv.config()
 
