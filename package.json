@@ -1,0 +1,14 @@
+{
+  "name": "watermark-removal",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Watermark removal using Gemini API",
+  "main": "removeWatermark.js",
+  "scripts": {
+    "start": "node removeWatermark.js"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.0",
+    "dotenv": "^16.4.1"
+  }
+} 
