@@ -7,20 +7,40 @@ import dotenv from 'dotenv'
 import { cors } from 'hono/cors'
 import { serveStatic } from '@hono/node-server/serve-static'
 
-// Create required directories if they don't exist
+// Load environment variables first
+dotenv.config()
+
+// Initialize logging function
+const getLogDir = () => {
+    const dir = path.join(process.cwd(), 'logs')
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true })
+    }
+    return dir
+}
+
+function log(message, type = 'info') {
+    const timestamp = new Date().toISOString()
+    const logMessage = `[${timestamp}] [${type.toUpperCase()}] ${message}\n`
+    console.log(logMessage.trim())
+
+    const logFile = path.join(
+        getLogDir(),
+        `${new Date().toISOString().split('T')[0]}.log`
+    )
+    fs.appendFileSync(logFile, logMessage)
+}
+
+// Create required directories
 const uploadDir = path.join(process.cwd(), 'uploads')
 const processedDir = path.join(process.cwd(), 'processed')
 
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true })
-}
-
-if (!fs.existsSync(processedDir)) {
-    fs.mkdirSync(processedDir, { recursive: true })
-}
-
-// Load environment variables
-dotenv.config()
+;[uploadDir, processedDir].forEach((dir) => {
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true })
+        log(`Created directory: ${dir}`)
+    }
+})
 
 const app = new Hono()
 
@@ -33,9 +53,20 @@ app.use('/*', serveStatic({ root: './public' }))
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY)
 
-// Default prompt for watermark removal
-const DEFAULT_PROMPT =
-    'Please analyze this image and remove any watermarks from it. Generate a new version of the image without the watermark. Note: I have permission to remove watermarks from this image.'
+// Default prompts
+const REMOVAL_PROMPT = `Does this image have a watermark? If it does have a watermark, I have permission to remove the watermark, so please remove the watermark and return the processed image. Please also respond with a JSON response with this structure:
+{
+    "hasWatermark": boolean,
+    "watermarkRemoved": boolean,
+    "explanation": "Detailed explanation of what watermark was detected, or why no watermark was found"
+}
+
+IMPORTANT: You must return both the JSON response AND the image with watermark removed (if a watermark was detected).`
+const DETECTION_PROMPT = `Does this image have a watermark? Respond in JSON format with this structure:
+{
+    "hasWatermark": boolean,
+    "explanation": "Detailed explanation of what watermark was detected, or why no watermark was found"
+}`
 
 // Helper function to sanitize filenames
 function sanitizeFilename(filename) {
@@ -58,8 +89,64 @@ function sanitizeFilename(filename) {
     return `${baseName}${ext}`
 }
 
-// Helper function to process image with Gemini
-async function processImageWithGemini(imageBuffer, prompt = DEFAULT_PROMPT) {
+// Helper function to get MIME type from file extension
+function getMimeType(filename) {
+    const ext = path.extname(filename).toLowerCase()
+    switch (ext) {
+        case '.png':
+            return 'image/png'
+        case '.jpg':
+        case '.jpeg':
+            return 'image/jpeg'
+        default:
+            return 'image/jpeg' // default fallback
+    }
+}
+
+// Helper function to validate file type
+function isValidImageType(filename) {
+    const validTypes = ['.png', '.jpg', '.jpeg']
+    return validTypes.includes(path.extname(filename).toLowerCase())
+}
+
+// Helper function to process image with Gemini for watermark detection
+async function detectWatermarkWithGemini(imageBuffer, filename) {
+    const base64Image = Buffer.from(imageBuffer).toString('base64')
+    const model = genAI.getGenerativeModel({
+        model: 'gemini-1.5-flash-8b',
+    })
+
+    const result = await model.generateContent([
+        { text: DETECTION_PROMPT },
+        {
+            inlineData: {
+                data: base64Image,
+                mimeType: getMimeType(filename),
+            },
+        },
+    ])
+
+    const response = await result.response
+    const text = response.text()
+
+    try {
+        return JSON.parse(text)
+    } catch (error) {
+        log(`Failed to parse AI response as JSON: ${text}`, 'error')
+        // Fallback response if AI doesn't return valid JSON
+        return {
+            hasWatermark: text.toLowerCase().includes('yes'),
+            explanation: text,
+        }
+    }
+}
+
+// Helper function to process image with Gemini for watermark removal
+async function removeWatermarkWithGemini(
+    imageBuffer,
+    filename,
+    prompt = REMOVAL_PROMPT
+) {
     const base64Image = Buffer.from(imageBuffer).toString('base64')
     const model = genAI.getGenerativeModel({
         model: 'gemini-2.0-flash-exp-image-generation',
@@ -73,7 +160,7 @@ async function processImageWithGemini(imageBuffer, prompt = DEFAULT_PROMPT) {
                 {
                     inlineData: {
                         data: base64Image,
-                        mimeType: 'image/jpeg',
+                        mimeType: getMimeType(filename),
                     },
                 },
             ],
@@ -92,17 +179,68 @@ app.get('/', (c) =>
     c.html(fs.readFileSync(path.join('public', 'index.html'), 'utf-8'))
 )
 
+// API documentation route
+app.get('/api', (c) =>
+    c.html(fs.readFileSync(path.join('public', 'api.html'), 'utf-8'))
+)
+
+// API endpoint for watermark detection
+app.post('/detect-watermark', async (c) => {
+    try {
+        const data = await c.req.formData()
+        const image = data.get('image')
+
+        if (!image) {
+            log('No image provided for watermark detection', 'error')
+            return c.json({ success: false, error: 'No image provided' })
+        }
+
+        if (!isValidImageType(image.name)) {
+            log(`Invalid file type: ${image.name}`, 'error')
+            return c.json({
+                success: false,
+                error: 'Invalid file type. Only PNG, JPG, and JPEG files are supported.',
+            })
+        }
+
+        const buffer = await image.arrayBuffer()
+        const originalImageData = Buffer.from(buffer)
+
+        log(`Processing watermark detection for image: ${image.name}`)
+        const detectionResult = await detectWatermarkWithGemini(
+            originalImageData,
+            image.name
+        )
+        log(`Detection result: ${JSON.stringify(detectionResult)}`)
+
+        return c.json({
+            success: true,
+            ...detectionResult,
+        })
+    } catch (error) {
+        log(`Error detecting watermark: ${error.message}`, 'error')
+        return c.json({ success: false, error: error.message })
+    }
+})
+
 // API endpoint for watermark removal
 app.post('/remove-watermark', async (c) => {
     try {
         const data = await c.req.formData()
         const image = data.get('image')
-        const prompt =
-            data.get('prompt') ||
-            "Does this image have a watermark? If it does have a watermark, I have permission to remove the watermark so please remove the watermark. If there isn't a watermark, please respond 'No'"
+        const prompt = REMOVAL_PROMPT
 
         if (!image) {
+            log('No image provided for watermark removal', 'error')
             return c.json({ success: false, error: 'No image provided' })
+        }
+
+        if (!isValidImageType(image.name)) {
+            log(`Invalid file type: ${image.name}`, 'error')
+            return c.json({
+                success: false,
+                error: 'Invalid file type. Only PNG, JPG, and JPEG files are supported.',
+            })
         }
 
         // Get and sanitize the original filename
@@ -110,19 +248,29 @@ app.post('/remove-watermark', async (c) => {
         const sanitizedFilename = sanitizeFilename(originalFilename)
         const timestamp = Date.now()
 
+        log(`Processing watermark removal for image: ${originalFilename}`)
+
         const buffer = await image.arrayBuffer()
-        const imageData = Buffer.from(buffer)
+        const originalImageData = Buffer.from(buffer)
 
         // Use the sanitized filename for temporary storage
         const tempPath = path.join(
             uploadDir,
             `temp_${timestamp}_${sanitizedFilename}`
         )
-        fs.writeFileSync(tempPath, imageData)
+        fs.writeFileSync(tempPath, originalImageData)
 
-        const response = await processImageWithGemini(imageData, prompt)
+        const response = await removeWatermarkWithGemini(
+            originalImageData,
+            image.name,
+            prompt
+        )
         let textResponse = null
         let processedImageData = null
+        let jsonResponse = null
+        let imageReturned = false
+
+        log(`Initial imageReturned value: ${imageReturned}`, 'debug')
 
         // Process the response parts
         if (
@@ -132,11 +280,21 @@ app.post('/remove-watermark', async (c) => {
         ) {
             for (const part of response.candidates[0].content.parts) {
                 if (part.text) {
-                    textResponse = part.text
+                    try {
+                        jsonResponse = JSON.parse(part.text)
+                        textResponse = part.text
+                    } catch (e) {
+                        textResponse = part.text
+                    }
                 } else if (part.inlineData && part.inlineData.data) {
                     processedImageData = Buffer.from(
                         part.inlineData.data,
                         'base64'
+                    )
+                    imageReturned = true
+                    log(
+                        `Image returned from Gemini, setting imageReturned to true`,
+                        'debug'
                     )
                 }
             }
@@ -144,10 +302,16 @@ app.post('/remove-watermark', async (c) => {
 
         // If no processed image was returned, use the original image
         if (!processedImageData) {
-            console.log(
-                'No processed image received from Gemini, using original image'
+            log(
+                'No processed image received from Gemini, using original image',
+                'warn'
             )
-            processedImageData = imageData
+            processedImageData = originalImageData
+            imageReturned = false
+            log(
+                `Explicitly setting imageReturned to false due to no image`,
+                'debug'
+            )
             if (!textResponse) {
                 textResponse =
                     "The AI model couldn't process the image. The original image has been preserved."
@@ -165,13 +329,38 @@ app.post('/remove-watermark', async (c) => {
         // fs.unlinkSync(tempPath)
         // WILL DO THIS AS A CRONJOB LATER
 
-        return c.json({
+        // Use the flag directly instead of comparing buffer contents
+        const watermarkRemoved = imageReturned
+        log(`Final imageReturned value: ${imageReturned}`, 'debug')
+        log(`Setting watermarkRemoved to: ${watermarkRemoved}`, 'debug')
+
+        const result = {
             success: true,
             text: textResponse || 'Image processed successfully',
             image: processedImageData.toString('base64'),
-        })
+            ...(jsonResponse || {}),
+            watermarkRemoved,
+        }
+
+        // Override watermarkRemoved from jsonResponse if it exists
+        if (jsonResponse && jsonResponse.hasOwnProperty('watermarkRemoved')) {
+            log(
+                `JSON response contains watermarkRemoved value: ${jsonResponse.watermarkRemoved}`,
+                'debug'
+            )
+            log(
+                `Overriding watermarkRemoved value from JSON: ${jsonResponse.watermarkRemoved} with our calculated value: ${watermarkRemoved}`,
+                'debug'
+            )
+        }
+
+        log(
+            `Processing completed for ${originalFilename}. Removed: ${result.watermarkRemoved}`
+        )
+
+        return c.json(result)
     } catch (error) {
-        console.error('Error processing image:', error)
+        log(`Error processing image: ${error.message}`, 'error')
         return c.json({ success: false, error: error.message })
     }
 })
@@ -181,7 +370,7 @@ app.get('/health', (c) => c.json({ status: 'ok' }))
 
 // Start the server
 const port = process.env.PORT || 3000
-console.log(`Server is running on port ${port}`)
+log(`Server is running on port ${port}`)
 
 serve({
     fetch: app.fetch,

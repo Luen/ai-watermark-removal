@@ -204,6 +204,18 @@
             border-radius: 12px;
             color: #64748b;
         }
+
+        .nav-link {
+            display: inline-block;
+            margin-top: 1rem;
+            color: #3498db;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .nav-link:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
@@ -211,6 +223,7 @@
         <header>
             <h1>Watermark Removal Tool</h1>
             <p>Upload an image to remove watermarks using AI</p>
+            <a href="/api" class="nav-link">View API Documentation →</a>
         </header>
 
         <div class="upload-section" id="dropZone">
@@ -222,7 +235,7 @@
             <div class="drop-text">Drag and drop your image here</div>
             <div class="drop-text-sub">or click to select from your computer</div>
             <form id="uploadForm">
-                <input type="file" id="image" name="image" accept="image/*" required>
+                <input type="file" id="image" name="image" accept="image/png,image/jpeg,image/jpg" required>
             </form>
         </div>
 
@@ -335,7 +348,33 @@
                     // Display text response if any
                     const textResponse = document.getElementById('textResponse');
                     if (data.text) {
-                        textResponse.innerHTML = `<p><strong>AI Response:</strong> ${data.text}</p>`;
+                        textResponse.innerHTML = ''; // Clear the text response first
+                        
+                        // Add watermark detection status
+                        const detectionStatus = data.hasWatermark === true ? 
+                            '<span style="color: orange; font-weight: bold;">True</span>' : 
+                            '<span style="color: blue; font-weight: bold;">False</span>';
+                        
+                        textResponse.innerHTML += `<p><strong>Watermark Detected:</strong> ${detectionStatus}</p>`;
+                        
+                        // Add explanation
+                        let explanation = '';
+                        // Try to extract explanation from JSON if possible
+                        try {
+                            const jsonData = typeof data.text === 'string' ? JSON.parse(data.text) : data.text;
+                            explanation = jsonData.explanation || data.text;
+                        } catch (e) {
+                            // If not valid JSON, use the whole text
+                            explanation = data.text;
+                        }
+                        textResponse.innerHTML += `<p><strong>Explanation:</strong> ${explanation}</p>`;
+                        
+                        // Add watermark removal status
+                        const removalStatus = data.watermarkRemoved === true ? 
+                            '<span style="color: green; font-weight: bold;">True</span>' : 
+                            '<span style="color: red; font-weight: bold;">False</span>';
+                        
+                        textResponse.innerHTML += `<p><strong>Watermark Removed:</strong> ${removalStatus}</p>`;
                     } else {
                         textResponse.innerHTML = '';
                     }

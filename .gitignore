@@ -133,3 +133,5 @@ dist
 # Custom
 processed/
 uploads/
+tests/downloads/
+tests/output/

@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Watermark Removal API Documentation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            background-color: #f8fafc;
+            color: #333;
+            min-height: 100vh;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 1000px;
+            width: 100%;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 3rem;
+        }
+
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 1rem;
+            font-size: 2.5rem;
+            font-weight: 700;
+        }
+
+        header p {
+            color: #64748b;
+            font-size: 1.1rem;
+        }
+
+        .nav-link {
+            display: inline-block;
+            margin-bottom: 2rem;
+            color: #3498db;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .nav-link:hover {
+            text-decoration: underline;
+        }
+
+        .endpoint {
+            background: white;
+            padding: 2rem;
+            border-radius: 20px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+            margin-bottom: 2rem;
+        }
+
+        .endpoint h2 {
+            color: #2c3e50;
+            margin-bottom: 1rem;
+            font-size: 1.8rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .method {
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+
+        .method.post {
+            background-color: #10b981;
+            color: white;
+        }
+
+        .method.get {
+            background-color: #3b82f6;
+            color: white;
+        }
+
+        .endpoint-path {
+            font-family: monospace;
+            font-size: 1.2rem;
+            color: #1e293b;
+        }
+
+        .section {
+            margin-top: 1.5rem;
+        }
+
+        .section h3 {
+            color: #2c3e50;
+            margin-bottom: 0.8rem;
+            font-size: 1.3rem;
+        }
+
+        .parameter {
+            margin-bottom: 1rem;
+        }
+
+        .parameter-name {
+            font-weight: 600;
+            color: #1e293b;
+        }
+
+        .parameter-type {
+            font-family: monospace;
+            color: #64748b;
+            font-size: 0.9rem;
+        }
+
+        .parameter-required {
+            color: #ef4444;
+            font-size: 0.9rem;
+            margin-left: 0.5rem;
+        }
+
+        .parameter-description {
+            margin-top: 0.5rem;
+            color: #64748b;
+        }
+
+        .response-example {
+            background-color: #f8fafc;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-top: 1rem;
+            font-family: monospace;
+            white-space: pre-wrap;
+            color: #1e293b;
+        }
+
+        .error-response {
+            background-color: #fef2f2;
+            border: 1px solid #fee2e2;
+            color: #ef4444;
+        }
+
+        .success-response {
+            background-color: #f0fdf4;
+            border: 1px solid #dcfce7;
+            color: #22c55e;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Watermark Removal API Documentation</h1>
+            <p>Documentation for the Watermark Removal API endpoints</p>
+            <a href="/" class="nav-link">← Back to Homepage</a>
+        </header>
+
+        <div class="endpoint">
+            <h2>
+                <span class="method post">POST</span>
+                <span class="endpoint-path">/remove-watermark</span>
+            </h2>
+            <p>Remove watermark from an image using AI</p>
+
+            <div class="section">
+                <h3>Request Parameters</h3>
+                <div class="parameter">
+                    <span class="parameter-name">image</span>
+                    <span class="parameter-type">File</span>
+                    <span class="parameter-required">Required</span>
+                    <div class="parameter-description">
+                        The image file to process. Supported formats: PNG, JPG, JPEG
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <h3>Response</h3>
+                <div class="parameter">
+                    <div class="parameter-description">
+                        Returns a JSON object containing the processing results and the processed image.
+                    </div>
+                </div>
+
+                <h4>Success Response</h4>
+                <div class="response-example success-response">
+{
+    "success": true,
+    "text": "AI Response text",
+    "image": "base64 encoded image data",
+    "watermarkRemoved": true,
+    "hasWatermark": true,
+    "explanation": "Detailed explanation of the watermark detection and removal"
+}</div>
+
+                <h4>Error Response</h4>
+                <div class="response-example error-response">
+{
+    "success": false,
+    "error": "Error message describing what went wrong"
+}</div>
+            </div>
+        </div>
+
+        <div class="endpoint">
+            <h2>
+                <span class="method post">POST</span>
+                <span class="endpoint-path">/detect-watermark</span>
+            </h2>
+            <p>Detect if an image contains a watermark</p>
+
+            <div class="section">
+                <h3>Request Parameters</h3>
+                <div class="parameter">
+                    <span class="parameter-name">image</span>
+                    <span class="parameter-type">File</span>
+                    <span class="parameter-required">Required</span>
+                    <div class="parameter-description">
+                        The image file to analyze. Supported formats: PNG, JPG, JPEG
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <h3>Response</h3>
+                <div class="parameter">
+                    <div class="parameter-description">
+                        Returns a JSON object containing the watermark detection results.
+                    </div>
+                </div>
+
+                <h4>Success Response</h4>
+                <div class="response-example success-response">
+{
+    "success": true,
+    "hasWatermark": true,
+    "explanation": "Detailed explanation of what watermark was detected"
+}</div>
+
+                <h4>Error Response</h4>
+                <div class="response-example error-response">
+{
+    "success": false,
+    "error": "Error message describing what went wrong"
+}</div>
+            </div>
+        </div>
+
+        <div class="endpoint">
+            <h2>
+                <span class="method get">GET</span>
+                <span class="endpoint-path">/health</span>
+            </h2>
+            <p>Check the health status of the API</p>
+
+            <div class="section">
+                <h3>Response</h3>
+                <div class="parameter">
+                    <div class="parameter-description">
+                        Returns a JSON object indicating the API status.
+                    </div>
+                </div>
+
+                <h4>Success Response</h4>
+                <div class="response-example success-response">
+{
+    "status": "ok"
+}</div>
+            </div>
+        </div>
+    </div>
+</body>
+</html> 

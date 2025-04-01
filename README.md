@@ -1,27 +1,33 @@
-# Watermark Removal Tool 🖼️
+# Watermark Removal Tool
 
-> An AI-powered web application that removes watermarks from images using Google's Gemini AI. Built with Node.js and Hono, featuring a modern drag-and-drop interface.
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-
-A web application that uses Google's Gemini AI to remove watermarks from images. Built with Node.js, Hono, and the Gemini API.
+A web application that uses AI to detect and remove watermarks from images. Built with Node.js and powered by Google's Gemini AI.
 
 ## Features
 
-- Upload images and remove watermarks using AI
-- Custom prompt support for specific watermark removal instructions
-- Real-time image processing
-- Side-by-side comparison of original and processed images
-- Modern, responsive user interface
-- RESTful API endpoint for programmatic access
+- Drag-and-drop image upload
+- Support for PNG, JPG, and JPEG formats
+- AI-powered watermark detection and removal
+- Real-time processing feedback
+- Clean and intuitive user interface
+- Comprehensive API documentation
+
+## API Documentation
+
+The API documentation is available at `/api` and includes detailed information about all available endpoints:
+
+- `POST /remove-watermark` - Remove watermark from an image
+- `POST /detect-watermark` - Detect if an image contains a watermark
+- `GET /health` - Check API health status
+
+For detailed API documentation, visit `http://localhost:3000/api` when running the application.
 
 ## Prerequisites
 
 - Node.js (v14 or higher)
-- npm (Node Package Manager)
-- Google Gemini API key
+- npm or yarn
+- Google API Key for Gemini AI
 
-## Installation
+## Setup
 
 1. Clone the repository:
 
@@ -36,83 +42,57 @@ A web application that uses Google's Gemini AI to remove watermarks from images.
     npm install
     ```
 
-3. Create a `.env` file in the root directory and add your Google Gemini API key:
+3. Create a `.env` file in the root directory and add your Google API key:
 
     ```env
     GOOGLE_API_KEY=your_api_key_here
     ```
 
-## Usage
-
-1. Start the server:
+4. Start the server:
 
     ```bash
     npm start
     ```
 
-2. Open your web browser and navigate to:
-
-    ```text
-    http://localhost:3000
-    ```
-
-3. Upload an image and optionally provide a custom prompt for watermark removal.
-
-## API Endpoints
-
-### POST /remove-watermark
-
-Removes watermarks from an uploaded image.
-
-**Request:**
-
-- Method: POST
-- Content-Type: multipart/form-data
-- Body:
-  - `image`: Image file (required)
-  - `prompt`: Custom prompt (optional)
-
-**Response:**
-
-```json
-{
-    "success": true,
-    "text": "AI response text (if any)",
-    "image": "base64_encoded_processed_image"
-}
-```
-
-### GET /health
-
-Health check endpoint.
-
-**Response:**
-
-```json
-{
-    "status": "ok"
-}
-```
+The application will be available at `http://localhost:3000`
 
 ## Project Structure
 
-```text
+```
 watermark-removal/
 ├── public/
-│   └── index.html      # Frontend interface
-├── test/               # Directory for temporary processed images
-├── .env               # Environment variables
+│   ├── index.html      # Main application interface
+│   └── api.html        # API documentation
+├── uploads/            # Temporary storage for uploaded images
+├── processed/          # Storage for processed images
+├── logs/              # Application logs
+├── server.js          # Main server file
 ├── package.json       # Project dependencies
-├── README.md         # This file
-└── server.js         # Backend server
+└── .env              # Environment variables
 ```
 
-## Dependencies
+## API Endpoints
 
-- @google/generative-ai: ^0.24.0
-- @hono/node-server: ^1.8.2
-- dotenv: ^16.4.1
-- hono: ^4.0.5
+### Remove Watermark
+- **URL**: `/remove-watermark`
+- **Method**: `POST`
+- **Content-Type**: `multipart/form-data`
+- **Parameters**:
+  - `image`: Image file (PNG, JPG, JPEG)
+- **Response**: JSON object with processing results and processed image
+
+### Detect Watermark
+- **URL**: `/detect-watermark`
+- **Method**: `POST`
+- **Content-Type**: `multipart/form-data`
+- **Parameters**:
+  - `image`: Image file (PNG, JPG, JPEG)
+- **Response**: JSON object with detection results
+
+### Health Check
+- **URL**: `/health`
+- **Method**: `GET`
+- **Response**: JSON object with API status
 
 ## Contributing
 
@@ -129,5 +109,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Acknowledgments
 
 - Google Gemini AI for providing the image processing capabilities
-- Hono framework for the web server
 - All contributors who help improve this project
