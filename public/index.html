@@ -355,7 +355,7 @@
                             '<span style="color: orange; font-weight: bold;">True</span>' : 
                             '<span style="color: blue; font-weight: bold;">False</span>';
                         
-                        textResponse.innerHTML += `<p><strong>Watermark Detected:</strong> ${detectionStatus}</p>`;
+                        textResponse.innerHTML += data.hasWatermark ? `<p><strong>Watermark Detected:</strong> ${detectionStatus}</p>` : '';
                         
                         // Add explanation
                         let explanation = '';

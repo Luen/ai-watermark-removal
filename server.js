@@ -54,7 +54,8 @@ app.use('/*', serveStatic({ root: './public' }))
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY)
 
 // Default prompts
-const REMOVAL_PROMPT = `Does this image have a watermark? If it does have a watermark, I have permission to remove the watermark, so please remove the watermark and return the processed image. Please also respond with a JSON response with this structure:
+const REMOVAL_PROMPT = `Please analyze this image and remove any watermarks from it. Generate a new version of the image without the watermark. Note: I have permission to remove watermarks from this image.`
+const REMOVAL_PROMPT_2 = `Does this image have a watermark? If it does have a watermark, I have permission to remove the watermark, so please remove the watermark and return the processed image. Please also respond with a JSON response with this structure:
 {
     "hasWatermark": boolean,
     "watermarkRemoved": boolean,
@@ -229,6 +230,131 @@ app.post('/remove-watermark', async (c) => {
         const data = await c.req.formData()
         const image = data.get('image')
         const prompt = REMOVAL_PROMPT
+
+        if (!image) {
+            log('No image provided for watermark removal', 'error')
+            return c.json({ success: false, error: 'No image provided' })
+        }
+
+        if (!isValidImageType(image.name)) {
+            log(`Invalid file type: ${image.name}`, 'error')
+            return c.json({
+                success: false,
+                error: 'Invalid file type. Only PNG, JPG, and JPEG files are supported.',
+            })
+        }
+
+        // Get and sanitize the original filename
+        const originalFilename = image.name
+        const sanitizedFilename = sanitizeFilename(originalFilename)
+        const timestamp = Date.now()
+
+        log(`Processing watermark removal for image: ${originalFilename}`)
+
+        const buffer = await image.arrayBuffer()
+        const originalImageData = Buffer.from(buffer)
+
+        // Use the sanitized filename for temporary storage
+        const tempPath = path.join(
+            uploadDir,
+            `temp_${timestamp}_${sanitizedFilename}`
+        )
+        fs.writeFileSync(tempPath, originalImageData)
+
+        const response = await removeWatermarkWithGemini(
+            originalImageData,
+            image.name,
+            prompt
+        )
+        let textResponse = null
+        let jsonResponse = null
+        let processedImageData = null
+        let imageReturned = false
+
+        // Process the response parts
+        if (
+            response.candidates &&
+            response.candidates[0] &&
+            response.candidates[0].content.parts
+        ) {
+            for (const part of response.candidates[0].content.parts) {
+                if (part.text) {
+                    try {
+                        textResponse = part.text
+                        jsonResponse = JSON.parse(textResponse)
+                    } catch (e) {
+                        textResponse = part.text
+                    }
+                } else if (part.inlineData && part.inlineData.data) {
+                    processedImageData = Buffer.from(
+                        part.inlineData.data,
+                        'base64'
+                    )
+                    imageReturned = true
+                    log(
+                        `Image returned from Gemini, setting imageReturned to true`,
+                        'debug'
+                    )
+                }
+            }
+        }
+
+        // If no processed image was returned, use the original image
+        if (!processedImageData) {
+            log(
+                'No processed image received from Gemini, using original image',
+                'warn'
+            )
+            processedImageData = originalImageData
+            imageReturned = false
+            log(
+                `Explicitly setting imageReturned to false due to no image`,
+                'debug'
+            )
+            if (!textResponse) {
+                textResponse =
+                    "The AI model couldn't process the image. The original image has been preserved."
+            }
+        }
+
+        // Save processed image with sanitized original filename
+        const processedPath = path.join(
+            processedDir,
+            `processed_${timestamp}_${sanitizedFilename}`
+        )
+        fs.writeFileSync(processedPath, processedImageData)
+
+        // Clean up the temporary file
+        // fs.unlinkSync(tempPath)
+        // WILL DO THIS AS A CRONJOB LATER
+
+        // Use the flag directly instead of comparing buffer contents
+        const watermarkRemoved = imageReturned
+        log(`Setting watermarkRemoved to: ${watermarkRemoved}`, 'debug')
+
+        const result = {
+            success: true,
+            text: textResponse || 'Image processed successfully',
+            image: processedImageData.toString('base64'),
+            ...(jsonResponse || {}),
+            watermarkRemoved,
+        }
+        log(
+            `Processing completed for ${originalFilename}. Removed: ${result.watermarkRemoved}`
+        )
+
+        return c.json(result)
+    } catch (error) {
+        log(`Error processing image: ${error.message}`, 'error')
+        return c.json({ success: false, error: error.message })
+    }
+})
+
+app.post('/remove-watermark-2', async (c) => {
+    try {
+        const data = await c.req.formData()
+        const image = data.get('image')
+        const prompt = REMOVAL_PROMPT_2
 
         if (!image) {
             log('No image provided for watermark removal', 'error')
