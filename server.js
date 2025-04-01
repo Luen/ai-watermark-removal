@@ -367,6 +367,84 @@ async function removeWatermarkWithGemini(
     return response
 }
 
+// Helper function to check if an image is mostly white (indicating a failed removal)
+async function isImageMostlyWhite(
+    imageBuffer,
+    whiteThreshold = 0.99,
+    avgBrightnessThreshold = 0.99
+) {
+    try {
+        // First, get image stats to analyze overall brightness
+        const stats = await sharp(imageBuffer).stats()
+
+        // Calculate average brightness across all channels
+        let totalBrightness = 0
+        stats.channels.forEach((channel) => {
+            totalBrightness += channel.mean / 255 // Normalize to 0-1 range
+        })
+        const avgBrightness = totalBrightness / stats.channels.length
+
+        // Check if standard deviation is very low (indicating uniform color)
+        let lowVariation = true
+        stats.channels.forEach((channel) => {
+            // If std dev is higher than 10% of possible range, it's not uniform
+            if (channel.std > 25) {
+                // 25/255 ≈ 10%
+                lowVariation = false
+            }
+        })
+
+        // Get full pixel data for more detailed analysis
+        const { data, info } = await sharp(imageBuffer)
+            .raw()
+            .toBuffer({ resolveWithObject: true })
+
+        const totalPixels = info.width * info.height
+        let whitePixels = 0
+
+        // For RGB(A) images, check for white pixels
+        const channels = info.channels
+        const pixelSize = channels // Number of bytes per pixel
+
+        for (let i = 0; i < data.length; i += pixelSize) {
+            // For RGB, consider white if all values are high (close to 255)
+            const r = data[i]
+            const g = data[i + 1]
+            const b = data[i + 2]
+            // More permissive white detection that also catches off-white colors
+            const isWhitePixel = r > 230 && g > 230 && b > 230
+            if (isWhitePixel) {
+                whitePixels++
+            }
+        }
+
+        const whiteRatio = whitePixels / totalPixels
+        log(
+            `White pixel ratio: ${whiteRatio.toFixed(
+                4
+            )} (${whitePixels} of ${totalPixels} pixels)`,
+            'debug'
+        )
+        log(
+            `Average brightness: ${avgBrightness.toFixed(
+                4
+            )}, Low variation: ${lowVariation}`,
+            'debug'
+        )
+
+        // Consider an image "failed" if:
+        // 1. It has a very high percentage of white pixels (exceeding threshold)
+        // 2. OR it's very bright overall AND has low variation (meaning it's a nearly uniform light color)
+        return (
+            whiteRatio > whiteThreshold ||
+            (avgBrightness > avgBrightnessThreshold && lowVariation)
+        )
+    } catch (error) {
+        log(`Error checking if image is white: ${error.message}`, 'error')
+        return false // Assume not white on error
+    }
+}
+
 // Root route - serve index.html
 app.get('/', (c) =>
     c.html(fs.readFileSync(path.join('public', 'index.html'), 'utf-8'))
@@ -541,6 +619,39 @@ app.post('/remove-watermark', async (c) => {
             if (!textResponse) {
                 textResponse =
                     "The AI model couldn't process the image. The original image has been preserved."
+            }
+        }
+
+        // Check if the processed image is mostly white (indicating a failed removal)
+        if (imageReturned) {
+            // Use a stricter threshold (higher value) for images that likely have white backgrounds already
+            // Use a more lenient threshold for images that are likely to have colorful backgrounds
+            const fileExtension = path.extname(image.name).toLowerCase()
+            const whiteThreshold =
+                fileExtension === '.jpg' || fileExtension === '.jpeg'
+                    ? 0.999
+                    : 0.99
+            const avgBrightnessThreshold =
+                fileExtension === '.jpg' || fileExtension === '.jpeg'
+                    ? 0.999
+                    : 0.99
+
+            const isMostlyWhite = await isImageMostlyWhite(
+                processedImageData,
+                whiteThreshold,
+                avgBrightnessThreshold
+            )
+            if (isMostlyWhite) {
+                log(
+                    `Processed image is mostly white (threshold: ${whiteThreshold}), likely a failed removal. Reverting to original image.`,
+                    'warn'
+                )
+                processedImageData = originalImageData
+                imageReturned = false
+                if (!textResponse) {
+                    textResponse =
+                        'The AI model returned a blank or mostly white image, indicating it removed too much content. The original image has been preserved.'
+                }
             }
         }
 
