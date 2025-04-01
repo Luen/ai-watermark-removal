@@ -6,6 +6,7 @@ import * as path from 'path'
 import dotenv from 'dotenv'
 import { cors } from 'hono/cors'
 import { serveStatic } from '@hono/node-server/serve-static'
+import sharp from 'sharp'
 
 // Load environment variables first
 dotenv.config()
@@ -106,8 +107,199 @@ function getMimeType(filename) {
 
 // Helper function to validate file type
 function isValidImageType(filename) {
-    const validTypes = ['.png', '.jpg', '.jpeg']
+    const validTypes = [
+        '.png',
+        '.jpg',
+        '.jpeg',
+        '.webp',
+        '.svg',
+        '.gif',
+        '.bmp',
+        '.tiff',
+        '.tif',
+        '.avif',
+    ]
     return validTypes.includes(path.extname(filename).toLowerCase())
+}
+
+// Helper function to convert image to JPEG/PNG while preserving transparency info
+async function convertToSupportedFormat(imageBuffer, filename) {
+    const ext = path.extname(filename).toLowerCase()
+
+    try {
+        // Check if conversion is needed based on file extension
+        if (['.jpg', '.jpeg'].includes(ext)) {
+            return {
+                buffer: imageBuffer,
+                filename: filename,
+                converted: false,
+                hasTransparency: false,
+                originalFormat: ext,
+            }
+        }
+
+        // For PNG, check if it has transparency
+        if (ext === '.png') {
+            const metadata = await sharp(imageBuffer).metadata()
+            const hasTransparency = metadata.hasAlpha || false
+
+            if (hasTransparency) {
+                log(
+                    `PNG with transparency detected, preserving alpha information`,
+                    'info'
+                )
+                // For sending to Gemini, we need white background
+                const processedBuffer = await sharp(imageBuffer)
+                    .flatten({ background: { r: 255, g: 255, b: 255 } })
+                    .png()
+                    .toBuffer()
+
+                return {
+                    buffer: processedBuffer,
+                    filename: filename,
+                    converted: true,
+                    hasTransparency: true,
+                    originalBuffer: imageBuffer,
+                    originalFormat: ext,
+                }
+            }
+
+            // No transparency, return original PNG
+            return {
+                buffer: imageBuffer,
+                filename: filename,
+                converted: false,
+                hasTransparency: false,
+                originalFormat: ext,
+            }
+        }
+
+        // For other formats that might have transparency (WebP, SVG, GIF)
+        // First check if the format has transparency
+        const metadata = await sharp(imageBuffer).metadata()
+        const hasTransparency = metadata.hasAlpha || false
+        const originalBuffer = hasTransparency ? imageBuffer : null
+
+        // For all other formats, convert to PNG with white background for Gemini
+        log(
+            `Converting ${ext} image to png format with white background`,
+            'info'
+        )
+        const convertedBuffer = await sharp(imageBuffer)
+            .flatten({ background: { r: 255, g: 255, b: 255 } })
+            .png()
+            .toBuffer()
+
+        // Change the extension to .png
+        const baseFilename = path.basename(filename, ext)
+        const newFilename = `${baseFilename}.png`
+
+        return {
+            buffer: convertedBuffer,
+            filename: newFilename,
+            converted: true,
+            hasTransparency,
+            originalBuffer: hasTransparency ? imageBuffer : null,
+            originalFormat: ext,
+        }
+    } catch (error) {
+        log(`Error converting image: ${error.message}`, 'error')
+        throw new Error(`Failed to convert image: ${error.message}`)
+    }
+}
+
+// Helper function to reapply transparency to a processed image
+async function reapplyTransparency(
+    processedImageBuffer,
+    originalImageBuffer,
+    originalFormat
+) {
+    try {
+        log('Reapplying transparency to processed image', 'info')
+
+        // Get dimensions of the processed image
+        const processedMetadata = await sharp(processedImageBuffer).metadata()
+        const processedWidth = processedMetadata.width
+        const processedHeight = processedMetadata.height
+
+        // Get dimensions of the original image
+        const originalMetadata = await sharp(originalImageBuffer).metadata()
+        log(
+            `Original dimensions: ${originalMetadata.width}x${originalMetadata.height}, Processed dimensions: ${processedWidth}x${processedHeight}`,
+            'debug'
+        )
+
+        // Make sure the original image has an alpha channel
+        if (!originalMetadata.hasAlpha) {
+            log(
+                'Original image does not have an alpha channel despite being marked as transparent',
+                'warn'
+            )
+            return processedImageBuffer
+        }
+
+        // Check for significant dimension differences
+        const widthRatio = processedWidth / originalMetadata.width
+        const heightRatio = processedHeight / originalMetadata.height
+        const ratioDifference = Math.abs(widthRatio - heightRatio)
+
+        let alphaData
+
+        // Handle different cases based on dimension discrepancies
+        if (ratioDifference > 0.5) {
+            // Extreme aspect ratio difference
+            log(
+                'Extreme aspect ratio difference detected, using composite approach',
+                'warn'
+            )
+
+            // First resize the whole original image with transparency intact
+            const resizedOriginal = await sharp(originalImageBuffer)
+                .resize(processedWidth, processedHeight, {
+                    fit: 'contain',
+                    background: { r: 0, g: 0, b: 0, alpha: 0 },
+                })
+                .toBuffer()
+
+            // Extract the alpha channel from this properly sized image
+            alphaData = await sharp(resizedOriginal)
+                .extractChannel(3)
+                .toBuffer()
+        } else if (ratioDifference > 0.2) {
+            // Significant but not extreme difference
+            log(
+                'Significant aspect ratio difference detected, using "contain" fit strategy',
+                'warn'
+            )
+
+            // Use contain strategy for better proportional fitting
+            alphaData = await sharp(originalImageBuffer)
+                .extractChannel(3)
+                .resize(processedWidth, processedHeight, {
+                    fit: 'contain',
+                    background: { r: 0, g: 0, b: 0, alpha: 0 },
+                })
+                .toBuffer()
+        } else {
+            // Similar enough aspect ratios
+            // Standard approach - just resize with fill
+            alphaData = await sharp(originalImageBuffer)
+                .extractChannel(3)
+                .resize(processedWidth, processedHeight, { fit: 'fill' })
+                .toBuffer()
+        }
+
+        // Apply the resized alpha channel to the processed image
+        return await sharp(processedImageBuffer)
+            .ensureAlpha()
+            .joinChannel(alphaData)
+            .png() // Always output as PNG when preserving transparency
+            .toBuffer()
+    } catch (error) {
+        log(`Error reapplying transparency: ${error.message}`, 'error')
+        // If reapplying transparency fails, return the processed image without transparency
+        return processedImageBuffer
+    }
 }
 
 // Helper function to process image with Gemini for watermark detection
@@ -200,17 +392,33 @@ app.post('/detect-watermark', async (c) => {
             log(`Invalid file type: ${image.name}`, 'error')
             return c.json({
                 success: false,
-                error: 'Invalid file type. Only PNG, JPG, and JPEG files are supported.',
+                error: 'Invalid file type. Supported formats: PNG, JPG, JPEG, WebP, SVG, GIF, BMP, TIFF, AVIF',
             })
         }
 
         const buffer = await image.arrayBuffer()
         const originalImageData = Buffer.from(buffer)
 
+        // Convert image if needed
+        const {
+            buffer: processableImageData,
+            filename: processableFilename,
+            converted,
+        } = await convertToSupportedFormat(originalImageData, image.name)
+
+        if (converted) {
+            log(
+                `Image was converted from ${path.extname(
+                    image.name
+                )} to ${path.extname(processableFilename)}`,
+                'info'
+            )
+        }
+
         log(`Processing watermark detection for image: ${image.name}`)
         const detectionResult = await detectWatermarkWithGemini(
-            originalImageData,
-            image.name
+            processableImageData,
+            processableFilename
         )
         log(`Detection result: ${JSON.stringify(detectionResult)}`)
 
@@ -240,7 +448,7 @@ app.post('/remove-watermark', async (c) => {
             log(`Invalid file type: ${image.name}`, 'error')
             return c.json({
                 success: false,
-                error: 'Invalid file type. Only PNG, JPG, and JPEG files are supported.',
+                error: 'Invalid file type. Supported formats: PNG, JPG, JPEG, WebP, SVG, GIF, BMP, TIFF, AVIF',
             })
         }
 
@@ -254,6 +462,25 @@ app.post('/remove-watermark', async (c) => {
         const buffer = await image.arrayBuffer()
         const originalImageData = Buffer.from(buffer)
 
+        // Convert image if needed
+        const {
+            buffer: processableImageData,
+            filename: processableFilename,
+            converted,
+            hasTransparency,
+            originalBuffer,
+            originalFormat,
+        } = await convertToSupportedFormat(originalImageData, image.name)
+
+        if (converted) {
+            log(
+                `Image was converted from ${path.extname(
+                    image.name
+                )} to ${path.extname(processableFilename)}`,
+                'info'
+            )
+        }
+
         // Use the sanitized filename for temporary storage
         const tempPath = path.join(
             uploadDir,
@@ -262,8 +489,8 @@ app.post('/remove-watermark', async (c) => {
         fs.writeFileSync(tempPath, originalImageData)
 
         const response = await removeWatermarkWithGemini(
-            originalImageData,
-            image.name,
+            processableImageData,
+            processableFilename,
             prompt
         )
         let textResponse = null
@@ -317,10 +544,41 @@ app.post('/remove-watermark', async (c) => {
             }
         }
 
+        // Reapply transparency if the original image had it and we got a processed result
+        if (hasTransparency && imageReturned && originalBuffer) {
+            log(
+                'Original image had transparency, reapplying to the processed image',
+                'info'
+            )
+            processedImageData = await reapplyTransparency(
+                processedImageData,
+                originalBuffer,
+                originalFormat
+            )
+        }
+
+        // Ensure processed image is saved with the correct extension
+        let processedFilename = sanitizedFilename
+        let outputMimeType = getMimeType(sanitizedFilename)
+
+        if (converted || hasTransparency) {
+            // If the original image was converted or had transparency, make sure the processed file uses the PNG extension
+            const baseFilename = path.basename(
+                processedFilename,
+                path.extname(processedFilename)
+            )
+            processedFilename = `${baseFilename}.png`
+            outputMimeType = 'image/png'
+            log(
+                `Setting output MIME type to ${outputMimeType} for transparency or converted image`,
+                'debug'
+            )
+        }
+
         // Save processed image with sanitized original filename
         const processedPath = path.join(
             processedDir,
-            `processed_${timestamp}_${sanitizedFilename}`
+            `processed_${timestamp}_${processedFilename}`
         )
         fs.writeFileSync(processedPath, processedImageData)
 
@@ -336,150 +594,10 @@ app.post('/remove-watermark', async (c) => {
             success: true,
             text: textResponse || 'Image processed successfully',
             image: processedImageData.toString('base64'),
+            mimeType: outputMimeType, // Add MIME type to the response
             ...(jsonResponse || {}),
             watermarkRemoved,
         }
-        log(
-            `Processing completed for ${originalFilename}. Removed: ${result.watermarkRemoved}`
-        )
-
-        return c.json(result)
-    } catch (error) {
-        log(`Error processing image: ${error.message}`, 'error')
-        return c.json({ success: false, error: error.message })
-    }
-})
-
-app.post('/remove-watermark-2', async (c) => {
-    try {
-        const data = await c.req.formData()
-        const image = data.get('image')
-        const prompt = REMOVAL_PROMPT_2
-
-        if (!image) {
-            log('No image provided for watermark removal', 'error')
-            return c.json({ success: false, error: 'No image provided' })
-        }
-
-        if (!isValidImageType(image.name)) {
-            log(`Invalid file type: ${image.name}`, 'error')
-            return c.json({
-                success: false,
-                error: 'Invalid file type. Only PNG, JPG, and JPEG files are supported.',
-            })
-        }
-
-        // Get and sanitize the original filename
-        const originalFilename = image.name
-        const sanitizedFilename = sanitizeFilename(originalFilename)
-        const timestamp = Date.now()
-
-        log(`Processing watermark removal for image: ${originalFilename}`)
-
-        const buffer = await image.arrayBuffer()
-        const originalImageData = Buffer.from(buffer)
-
-        // Use the sanitized filename for temporary storage
-        const tempPath = path.join(
-            uploadDir,
-            `temp_${timestamp}_${sanitizedFilename}`
-        )
-        fs.writeFileSync(tempPath, originalImageData)
-
-        const response = await removeWatermarkWithGemini(
-            originalImageData,
-            image.name,
-            prompt
-        )
-        let textResponse = null
-        let processedImageData = null
-        let jsonResponse = null
-        let imageReturned = false
-
-        log(`Initial imageReturned value: ${imageReturned}`, 'debug')
-
-        // Process the response parts
-        if (
-            response.candidates &&
-            response.candidates[0] &&
-            response.candidates[0].content.parts
-        ) {
-            for (const part of response.candidates[0].content.parts) {
-                if (part.text) {
-                    try {
-                        jsonResponse = JSON.parse(part.text)
-                        textResponse = part.text
-                    } catch (e) {
-                        textResponse = part.text
-                    }
-                } else if (part.inlineData && part.inlineData.data) {
-                    processedImageData = Buffer.from(
-                        part.inlineData.data,
-                        'base64'
-                    )
-                    imageReturned = true
-                    log(
-                        `Image returned from Gemini, setting imageReturned to true`,
-                        'debug'
-                    )
-                }
-            }
-        }
-
-        // If no processed image was returned, use the original image
-        if (!processedImageData) {
-            log(
-                'No processed image received from Gemini, using original image',
-                'warn'
-            )
-            processedImageData = originalImageData
-            imageReturned = false
-            log(
-                `Explicitly setting imageReturned to false due to no image`,
-                'debug'
-            )
-            if (!textResponse) {
-                textResponse =
-                    "The AI model couldn't process the image. The original image has been preserved."
-            }
-        }
-
-        // Save processed image with sanitized original filename
-        const processedPath = path.join(
-            processedDir,
-            `processed_${timestamp}_${sanitizedFilename}`
-        )
-        fs.writeFileSync(processedPath, processedImageData)
-
-        // Clean up the temporary file
-        // fs.unlinkSync(tempPath)
-        // WILL DO THIS AS A CRONJOB LATER
-
-        // Use the flag directly instead of comparing buffer contents
-        const watermarkRemoved = imageReturned
-        log(`Final imageReturned value: ${imageReturned}`, 'debug')
-        log(`Setting watermarkRemoved to: ${watermarkRemoved}`, 'debug')
-
-        const result = {
-            success: true,
-            text: textResponse || 'Image processed successfully',
-            image: processedImageData.toString('base64'),
-            ...(jsonResponse || {}),
-            watermarkRemoved,
-        }
-
-        // Override watermarkRemoved from jsonResponse if it exists
-        if (jsonResponse && jsonResponse.hasOwnProperty('watermarkRemoved')) {
-            log(
-                `JSON response contains watermarkRemoved value: ${jsonResponse.watermarkRemoved}`,
-                'debug'
-            )
-            log(
-                `Overriding watermarkRemoved value from JSON: ${jsonResponse.watermarkRemoved} with our calculated value: ${watermarkRemoved}`,
-                'debug'
-            )
-        }
-
         log(
             `Processing completed for ${originalFilename}. Removed: ${result.watermarkRemoved}`
         )

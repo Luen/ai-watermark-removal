@@ -216,6 +216,23 @@
         .nav-link:hover {
             text-decoration: underline;
         }
+
+        /* Additional styles for the download button */
+        .download-btn {
+            display: inline-block;
+            margin-top: 1rem;
+            padding: 0.5rem 1rem;
+            background-color: #3498db;
+            color: white;
+            border-radius: 5px;
+            text-decoration: none;
+            font-weight: 500;
+            transition: background-color 0.3s ease;
+        }
+        
+        .download-btn:hover {
+            background-color: #2980b9;
+        }
     </style>
 </head>
 <body>
@@ -235,7 +252,7 @@
             <div class="drop-text">Drag and drop your image here</div>
             <div class="drop-text-sub">or click to select from your computer</div>
             <form id="uploadForm">
-                <input type="file" id="image" name="image" accept="image/png,image/jpeg,image/jpg" required>
+                <input type="file" id="image" name="image" accept="image/png,image/jpeg,image/jpg,image/webp,image/svg+xml,image/gif,image/bmp,image/tiff,image/avif" required>
             </form>
         </div>
 
@@ -256,6 +273,7 @@
                 <div class="image-box">
                     <h3>Processed Image</h3>
                     <img id="processedImage" alt="Processed Image">
+                    <a id="downloadBtn" href="#" download class="download-btn">Download Image</a>
                 </div>
             </div>
             <div id="textResponse"></div>
@@ -343,7 +361,18 @@
                 if (data.success) {
                     // Display processed image
                     const processedImage = document.getElementById('processedImage');
-                    processedImage.src = `data:image/jpeg;base64,${data.image}`;
+                    // Use the MIME type from the server response or fallback to image/jpeg
+                    const mimeType = data.mimeType || 'image/jpeg';
+                    processedImage.src = `data:${mimeType};base64,${data.image}`;
+                    
+                    // Setup download button
+                    const downloadBtn = document.getElementById('downloadBtn');
+                    downloadBtn.href = `data:${mimeType};base64,${data.image}`;
+                    
+                    // Set a filename based on the original image name with proper extension
+                    const originalFileName = imageFile.name.split('.')[0];
+                    const extension = mimeType === 'image/png' ? 'png' : 'jpg';
+                    downloadBtn.download = `${originalFileName}_processed.${extension}`;
                     
                     // Display text response if any
                     const textResponse = document.getElementById('textResponse');
