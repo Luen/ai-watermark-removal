@@ -341,37 +341,100 @@ async function detectWatermarkWithGemini(imageBuffer, filename) {
     }
 }
 
+// Helper function to delay execution for a specified time
+async function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 // Helper function to process image with Gemini for watermark removal
 async function removeWatermarkWithGemini(
     imageBuffer,
     filename,
-    prompt = REMOVAL_PROMPT
+    prompt = REMOVAL_PROMPT,
+    maxRetries = 3,
+    initialDelay = 30000
 ) {
-    const base64Image = Buffer.from(imageBuffer).toString('base64')
-    const model = genAI.getGenerativeModel({
-        model: 'gemini-2.0-flash-exp-image-generation',
-    })
+    let retries = 0
 
-    const result = await model.generateContent({
-        contents: {
-            role: 'user',
-            parts: [
-                { text: prompt },
-                {
-                    inlineData: {
-                        data: base64Image,
-                        mimeType: getMimeType(filename),
-                    },
+    while (retries <= maxRetries) {
+        try {
+            log(
+                `Attempting watermark removal (Attempt ${retries + 1}/${
+                    maxRetries + 1
+                })`,
+                'info'
+            )
+            const base64Image = Buffer.from(imageBuffer).toString('base64')
+            const model = genAI.getGenerativeModel({
+                model: 'gemini-2.0-flash-exp-image-generation',
+            })
+
+            const result = await model.generateContent({
+                contents: {
+                    role: 'user',
+                    parts: [
+                        { text: prompt },
+                        {
+                            inlineData: {
+                                data: base64Image,
+                                mimeType: getMimeType(filename),
+                            },
+                        },
+                    ],
                 },
-            ],
-        },
-        generationConfig: {
-            responseModalities: ['Text', 'Image'],
-        },
-    })
+                generationConfig: {
+                    responseModalities: ['Text', 'Image'],
+                },
+            })
 
-    const response = await result.response
-    return response
+            const response = await result.response
+            return response
+        } catch (error) {
+            log(
+                `Error in watermark removal attempt ${retries + 1}: ${
+                    error.message
+                }`,
+                'error'
+            )
+
+            // Check if it's a rate limit error (429) or service overload error (503)
+            if (
+                error.message.includes('429') ||
+                error.message.includes('Too Many Requests') ||
+                error.message.includes('503') ||
+                error.message.includes('overloaded')
+            ) {
+                const waitTime = initialDelay * Math.pow(2, retries)
+                log(
+                    `Service error (rate limit or overload). Waiting ${
+                        waitTime / 1000
+                    } seconds before retrying...`,
+                    'warn'
+                )
+                await delay(waitTime)
+                retries++
+
+                if (retries > maxRetries) {
+                    log(
+                        `Max retries (${maxRetries}) reached for watermark removal. Giving up.`,
+                        'error'
+                    )
+                    throw new Error(
+                        `Service error after ${maxRetries} retries. Please try again later.`
+                    )
+                }
+            } else {
+                // For other errors, don't retry
+                log(
+                    `Non-retryable error for watermark removal: ${error.message}`,
+                    'error'
+                )
+                throw error
+            }
+        }
+    }
+
+    throw new Error('Unexpected error in watermark removal process')
 }
 
 // Helper function to check if an image is mostly white (indicating a failed removal)
@@ -572,6 +635,9 @@ app.post('/api/remove-watermark', async (c) => {
             `temp_${timestamp}_${sanitizedFilename}`
         )
         fs.writeFileSync(tempPath, originalImageData)
+
+        // Add a delay between API calls to avoid rate limits
+        await delay(10000) // 10 second delay between requests
 
         const response = await removeWatermarkWithGemini(
             processableImageData,
