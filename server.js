@@ -62,7 +62,9 @@ app.use('/*', serveStatic({ root: './public' }))
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY)
 
 // Default prompts
-const REMOVAL_PROMPT = `Please analyze this image and remove any watermarks from it. Generate a new version of the image without the watermark. Note: I have permission to remove watermarks from this image.`
+//const REMOVAL_PROMPT = `Please analyze this image and remove any watermarks from it. Please remove the text (e.g., "New Town Toyota" and "Nunawading") from the image if present. Do not remove anything else from the image. If the background is white, keep it white - likewise if the background is black, keep it black. Generate a new version of the image without the watermark. Note: I have permission to remove watermarks from this image.`
+const REMOVAL_PROMPT = `Does this image have a watermark? If it does have a watermark, I have permission to remove the watermark, so please remove the watermark and return the processed image.`
+
 const REMOVAL_PROMPT_2 = `Does this image have a watermark? If it does have a watermark, I have permission to remove the watermark, so please remove the watermark and return the processed image. Please also respond with a JSON response with this structure:
 {
     "hasWatermark": boolean,
@@ -695,6 +697,7 @@ app.post('/api/remove-watermark', async (c) => {
             }
         }
 
+        // Sometimes Gemini returns a blank image, so we need to check if the processed image is 99.99% all white (indicating a failed removal)
         // Check if the processed image is mostly white (indicating a failed removal)
         if (imageReturned) {
             // Use a stricter threshold (higher value) for images that likely have white backgrounds already
