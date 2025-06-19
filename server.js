@@ -652,13 +652,16 @@ app.post('/api/remove-watermark', async (c) => {
         let processedImageData = null
         let imageReturned = false
 
+        // For debugging, let's log the full response object
+        log(
+            `Gemini response payload: ${JSON.stringify(response, null, 2)}`,
+            'debug'
+        )
+
         // Process the response parts
-        if (
-            response.candidates &&
-            response.candidates[0] &&
-            response.candidates[0].content.parts
-        ) {
-            for (const part of response.candidates[0].content.parts) {
+        const candidate = response.candidates && response.candidates[0]
+        if (candidate && candidate.content && candidate.content.parts) {
+            for (const part of candidate.content.parts) {
                 if (part.text) {
                     try {
                         textResponse = part.text
@@ -677,6 +680,21 @@ app.post('/api/remove-watermark', async (c) => {
                         'debug'
                     )
                 }
+            }
+        } else if (candidate) {
+            // Handle cases where the response structure is unexpected
+            log(
+                `No content parts found in Gemini response. Finish reason: ${candidate.finishReason}`,
+                'warn'
+            )
+            if (candidate.finishReason === 'SAFETY') {
+                textResponse =
+                    'The image could not be processed due to safety settings.'
+            } else if (candidate.finishReason === 'RECITATION') {
+                textResponse =
+                    'The image could not be processed due to recitation restrictions.'
+            } else {
+                textResponse = `Image processing failed with reason: ${candidate.finishReason}`
             }
         }
 
